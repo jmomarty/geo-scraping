@@ -353,16 +353,73 @@ def wait_for_prompt_input(page: "Page", timeout_seconds: int) -> "Locator":
     )
 
 
+def normalize_compact_text(value: str) -> str:
+    return " ".join(value.split())
+
+
+def get_prompt_input_text(prompt_input: "Locator") -> str:
+    try:
+        tag_name = prompt_input.evaluate("el => el.tagName.toLowerCase()")
+        if tag_name == "textarea":
+            return cast(str, prompt_input.input_value())
+        return cast(str, prompt_input.evaluate("el => (el.innerText || el.textContent || '')"))
+    except Exception:
+        return ""
+
+
+def set_contenteditable_text(prompt_input: "Locator", prompt_text: str) -> None:
+    prompt_input.evaluate(
+        """
+        (el, text) => {
+          el.focus();
+          if ('value' in el) {
+            el.value = text;
+          } else {
+            el.textContent = text;
+          }
+          el.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: text }));
+          el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: text }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        """,
+        prompt_text,
+    )
+
+
 def submit_prompt(prompt_input: "Locator", prompt_text: str) -> None:
     tag_name = prompt_input.evaluate("el => el.tagName.toLowerCase()")
     prompt_input.click()
 
     if tag_name == "textarea":
         prompt_input.fill(prompt_text)
+        if not normalize_compact_text(get_prompt_input_text(prompt_input)):
+            prompt_input.type(prompt_text)
         prompt_input.press("Enter")
         return
 
-    prompt_input.fill(prompt_text)
+    try:
+        prompt_input.fill(prompt_text)
+    except Exception:
+        pass
+
+    observed_text = normalize_compact_text(get_prompt_input_text(prompt_input))
+    expected_text = normalize_compact_text(prompt_text)
+    if observed_text != expected_text:
+        try:
+            prompt_input.click()
+            try:
+                prompt_input.press("Meta+A")
+            except Exception:
+                prompt_input.press("Control+A")
+            prompt_input.press("Backspace")
+            prompt_input.type(prompt_text)
+        except Exception:
+            set_contenteditable_text(prompt_input, prompt_text)
+
+    observed_text = normalize_compact_text(get_prompt_input_text(prompt_input))
+    if observed_text != expected_text:
+        set_contenteditable_text(prompt_input, prompt_text)
+
     prompt_input.press("Enter")
 
 
