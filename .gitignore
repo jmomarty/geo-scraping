@@ -1,0 +1,32 @@
+# Python virtual envs and caches
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Local state and debug outputs
+.state/
+debug/
+logs/
+*.log
+
+# Generated data/results
+data/*.jsonl
+data/results*/
+results/
+
+# OS/editor files
+.DS_Store
+.idea/
+.vscode/
