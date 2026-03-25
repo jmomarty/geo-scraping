@@ -266,6 +266,28 @@ def save_debug_artifacts(page: Optional["Page"], debug_dir: Path, error_message:
         except Exception as exc:
             artifacts["html_error"] = str(exc)
 
+        # Save element structure for debugging selector issues
+        if "stalled_generation" in error_message:
+            try:
+                structure_path = run_dir / "dom_structure.txt"
+                structure_info = page.evaluate("""() => {
+                    const elements = [];
+                    // Look for potential response containers
+                    document.querySelectorAll('[class*="response"], [class*="message"], [class*="model"], [data-message-author-role], model-response, message-content').forEach(el => {
+                        elements.push({
+                            tag: el.tagName,
+                            classes: el.className,
+                            attributes: Array.from(el.attributes).map(a => a.name + '=' + a.value),
+                            text_preview: (el.innerText || '').substring(0, 100)
+                        });
+                    });
+                    return JSON.stringify(elements, null, 2);
+                }""")
+                structure_path.write_text(structure_info, encoding="utf-8")
+                artifacts["dom_structure"] = str(structure_path)
+            except Exception as exc:
+                artifacts["dom_structure_error"] = str(exc)
+
     meta_path = run_dir / "meta.json"
     meta_payload = {
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
@@ -513,11 +535,41 @@ def extract_latest_assistant_text(page: "Page") -> Optional[str]:
         for idx in range(count - 1, -1, -1):
             candidate = locator.nth(idx)
             try:
+                # Try innerText first
                 text = candidate.inner_text(timeout=1200).strip()
+                if text:
+                    return text
+                # Try textContent as fallback
+                text = candidate.evaluate("el => el.textContent || ''").strip()
+                if text:
+                    return text
             except Exception:
                 continue
-            if text:
-                return text
+
+    # Fallback: try to extract any response content from common patterns
+    fallback_selectors = [
+        '[class*="response-container"]',
+        '[class*="message-content"]',
+        '[class*="model-response"]',
+        '[data-message-author-role="model"]',
+        '[class*="assistant"]',
+        '[class*="bot-message"]',
+        '[class*="ai-message"]',
+    ]
+    for selector in fallback_selectors:
+        try:
+            locator = page.locator(selector)
+            if locator.count() > 0:
+                # Try innerText first
+                text = locator.last.inner_text(timeout=1200).strip()
+                if text:
+                    return text
+                # Try textContent as fallback
+                text = locator.last.evaluate("el => el.textContent || ''").strip()
+                if text:
+                    return text
+        except Exception:
+            continue
 
     return None
 
@@ -622,6 +674,7 @@ def wait_for_final_answer(
     last_text: Optional[str] = None
     stable_since: Optional[float] = None
     saw_meaningful_text = False
+    debug_logged = False
 
     while time.monotonic() < deadline:
         ui_error = ui_has_error_banner(page)
@@ -642,6 +695,10 @@ def wait_for_final_answer(
 
         generating = is_generating(page)
         if not saw_meaningful_text and now >= stall_deadline and (generating or has_assistant_turn(page)):
+            # Add debug info before raising
+            if not debug_logged:
+                print(f"[DEBUG] Stall detected. generating={generating}, has_assistant_turn={has_assistant_turn(page)}, current_text={repr(current_text[:100] if current_text else None)}", file=sys.stderr)
+                debug_logged = True
             raise TimeoutError(
                 "stalled_generation: Gemini remained in-progress without meaningful "
                 f"assistant text for at least {stall_timeout_seconds}s."
