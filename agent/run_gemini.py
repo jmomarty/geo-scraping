@@ -703,15 +703,15 @@ def run(
     force_new_page = False
 
     try:
-        try:
-            from playwright.sync_api import sync_playwright
-        except ModuleNotFoundError as exc:
-            raise RuntimeError(
-                "Missing dependency 'playwright'. Install dependencies with "
-                "`uv pip install -e .` and run `uv run playwright install chromium`."
-            ) from exc
+        from playwright.sync_api import sync_playwright
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "Missing dependency 'playwright'. Install dependencies with "
+            "`uv pip install -e .` and run `uv run playwright install chromium`."
+        ) from exc
 
-        with sync_playwright() as playwright:
+    with sync_playwright() as playwright:
+        try:
             browser, context, selected_channel, cleanup_browser, cleanup_context, force_new_page = launch_browser_context(
                 cast("Playwright", playwright),
                 browser_channel=browser_channel,
@@ -770,36 +770,42 @@ def run(
                 page.wait_for_timeout(int(delay_seconds * 1000))
 
             return summary
-    except Exception as exc:
-        # Fatal setup failure before or during the batch: emit one failed record per sample.
-        for sample_index in range(1, samples + 1):
-            record = build_sample_record(
-                prompt=prompt,
-                provider="gemini",
-                run_id=run_id,
-                sample_index=sample_index,
-                sample_total=samples,
-            )
-            record["status"] = "error"
-            record["error"] = str(exc)
-            record["debug_artifacts"] = save_debug_artifacts(
-                page=page,
-                debug_dir=debug_dir,
-                error_message=str(exc),
-            )
-            append_jsonl(output_path, record)
-            summary["error_count"] += 1
-        return summary
-    finally:
-        if page is not None and force_new_page:
-            try:
-                page.close()
-            except Exception:
-                pass
-        if context is not None and cleanup_context:
-            context.close()
-        if browser is not None and cleanup_browser:
-            browser.close()
+        except Exception as exc:
+            # Fatal setup failure before or during the batch: emit one failed record per sample.
+            for sample_index in range(1, samples + 1):
+                record = build_sample_record(
+                    prompt=prompt,
+                    provider="gemini",
+                    run_id=run_id,
+                    sample_index=sample_index,
+                    sample_total=samples,
+                )
+                record["status"] = "error"
+                record["error"] = str(exc)
+                record["debug_artifacts"] = save_debug_artifacts(
+                    page=page,
+                    debug_dir=debug_dir,
+                    error_message=str(exc),
+                )
+                append_jsonl(output_path, record)
+                summary["error_count"] += 1
+            return summary
+        finally:
+            if page is not None and force_new_page:
+                try:
+                    page.close()
+                except Exception:
+                    pass
+            if context is not None and cleanup_context:
+                try:
+                    context.close()
+                except Exception:
+                    pass
+            if browser is not None and cleanup_browser:
+                try:
+                    browser.close()
+                except Exception:
+                    pass
 
 
 def main() -> int:
